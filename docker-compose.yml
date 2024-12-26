@@ -14,4 +14,5 @@ services:
     #           count: 1
     #           capabilities: [ gpu ]
     environment:
-      LOG_LEVEL: WARNING
+      LOG_LEVEL: INFO
+      KOKORO_API_KEY: hello
