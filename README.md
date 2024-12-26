@@ -1,4 +1,4 @@
-# Kokoro TTS API
+# Kokoro TTS
 Text-To-Speech Inference Server for [Kokoro TTS](https://huggingface.co/hexgrad/Kokoro-82M/tree/main).
 
 ## Usage
@@ -30,8 +30,8 @@ curl -X POST "http://localhost:4321/generate" \
 
 ## API Options
 
-`text`: Text to convert to speech.
-`phonetics`: **optional** Custom phonetics string for pronunciation. If not provided, will be generated automatically.
-`voice`: **optional** Select voice to use: 'bella', 'sarah', or 'default'.
-`speed`: **optional** Speech speed factor. 1.0 is normal speed.
-`output_format`: **optional** mp3 (can use wav).
+* `text`: Text to convert to speech.
+* `phonetics`: **optional** Custom phonetics string for pronunciation. If not provided, will be generated automatically.
+* `voice`: **optional** Select voice to use: 'bella', 'sarah', or 'default'.
+* `speed`: **optional** Speech speed factor. 1.0 is normal speed.
+* `output_format`: **optional** mp3 (can use wav).
