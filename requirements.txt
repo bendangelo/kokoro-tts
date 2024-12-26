@@ -1,9 +1,12 @@
 soundfile
 torchaudio
-styletts2
-# styletts2 @ git+https://github.com/bendangelo/StyleTTS2@main
+# kokoro @ git+https://huggingface.co/hexgrad/Kokoro-82M@main
 fastapi
 pydantic
 uvicorn
 pydub
 python-magic
+scipy
+transformers
+munch
+phonemizer

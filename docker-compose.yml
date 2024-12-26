@@ -1,17 +1,17 @@
 services:
   tts:
-    image: saladtechnologies/styletts2:latest
+    image: bendangelo/kokoro-tts:latest
     build:
       context: .
       dockerfile: Dockerfile
     ports:
       - 4321:4321
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [ gpu ]
     environment:
       LOG_LEVEL: WARNING

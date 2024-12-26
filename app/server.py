@@ -31,6 +31,8 @@ port = int(port)
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 kokoro_model = build_model('kokoro-v0_19.pth', device)
 voicepack = torch.load('voices/af.pt', weights_only=True).to(device)
+af_bella = torch.load('voices/af_bella.pt', weights_only=True).to(device)
+af_sarah = torch.load('voices/af_sarah.pt', weights_only=True).to(device)
 
 from kokoro import generate, tokenize, VOCAB
 
@@ -59,6 +61,19 @@ def get_wav_length_from_bytesio(bytes_io):
     duration_seconds = len(audio) / 1000.0
     return audio, duration_seconds
 
+@app.get("/hc")
+def health_check():
+    return {"status": "ok", "version": __version__}
+
+def get_voice_model(voice_name: str):
+    """Helper function to get the appropriate voice model"""
+    voice_mapping = {
+        "bella": af_bella,
+        "sarah": af_sarah,
+        "default": voicepack
+    }
+    return voice_mapping.get(voice_name, voicepack)
+
 class TTSRequest(BaseModel):
     text: str = Field(..., title="Text to convert to speech")
     phonetics: Optional[str] = Field(
@@ -67,6 +82,11 @@ class TTSRequest(BaseModel):
         description="Custom phonetics string for pronunciation. If not provided, will be generated automatically."
     )
     voice: Optional[str] = Field(
+        "default",
+        title="Voice selection",
+        description="Select voice to use: 'bella', 'sarah', or 'default'"
+    )
+    voice_sample: Optional[str] = Field(
         None,
         title="Base64 encoded voice sample",
         description="If provided, the model will attempt to match the voice of the provided sample. 3-5s of sample audio is recommended.",
@@ -77,30 +97,36 @@ class TTSRequest(BaseModel):
         title="Speech speed",
         description="Speech speed factor. 1.0 is normal speed."
     )
-    # StyleTTS2 specific parameters
     alpha: Optional[float] = Field(0.3, title="Alpha (StyleTTS2 only)")
     beta: Optional[float] = Field(0.7, title="Beta (StyleTTS2 only)")
     diffusion_steps: Optional[int] = Field(5, title="Diffusion steps (StyleTTS2 only)")
     embedding_scale: Optional[float] = Field(1, title="Embedding scale (StyleTTS2 only)")
     output_format: Optional[str] = "mp3"
 
-@app.get("/hc")
-def health_check():
-    return {"status": "ok", "version": __version__}
-
 @app.post("/generate")
 def generate_speech(request: TTSRequest, background_tasks: BackgroundTasks):
     start = time.perf_counter()
     wav_bytes = BytesIO()
+    
+    # Get the appropriate voice model
+    voice_model = get_voice_model(request.voice)
+    
+    # Initialize audio variable
+    audio = None
     
     if request.phonetics:
         # Use provided phonetics
         tokens = tokenize(request.phonetics)
         if not tokens:
             raise HTTPException(status_code=400, detail="Invalid phonetics string")
+        # Generate audio using phonetics
+        audio, _ = generate(kokoro_model, request.text, voice_model, speed=request.speed, phonetics=request.phonetics)
     else:
         # Generate phonetics from text
-        audio, phonetics = generate(kokoro_model, request.text, voicepack, speed=request.speed)
+        audio, phonetics = generate(kokoro_model, request.text, voice_model, speed=request.speed)
+    
+    if audio is None:
+        raise HTTPException(status_code=500, detail="Failed to generate audio")
         
     # Convert numpy array to wav
     import scipy.io.wavfile as wav
