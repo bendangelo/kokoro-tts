@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+FROM --platform=$BUILDPLATFORM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
 
 WORKDIR /app
 ENV TZ=etc/UTC DEBIAN_FRONTEND=noninteractive
