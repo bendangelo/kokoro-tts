@@ -146,7 +146,7 @@ def generate_speech(request: TTSRequest, api_key: str = Depends(verify_api_key))
         request.text, 
         voice_model, 
         speed=request.speed, 
-        ps=request.phonetics,
+        # ps=request.phonetics,
         lang=language[0]  # Pass first letter of language code ('a' or 'b')
     )
 
