@@ -6,7 +6,7 @@ import os
 from fastapi import FastAPI, Security, HTTPException, Depends
 from pydantic import BaseModel, Field
 from starlette.status import HTTP_403_FORBIDDEN
-from typing import Optional
+from typing import Optional, Literal
 import uvicorn
 from __version__ import __version__
 import logging
@@ -16,7 +16,6 @@ from fastapi.responses import StreamingResponse
 import torch
 from models import build_model
 import numpy as np
-
 
 # Setup logging
 log_level = os.getenv("LOG_LEVEL", "INFO")
@@ -30,12 +29,26 @@ host = os.getenv("HOST", "*")
 port = os.getenv("PORT", "4321")
 port = int(port)
 
+# Available voices configuration
+VOICE_NAMES = [
+    'af',  # Default voice (50-50 mix of Bella & Sarah)
+    'af_bella', 'af_sarah', 'am_adam', 'am_michael',
+    'bf_emma', 'bf_isabella', 'bm_george', 'bm_lewis',
+    'af_nicole', 'af_sky'
+]
+
 # Model initialization
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 kokoro_model = build_model('kokoro-v0_19.pth', device)
-voicepack = torch.load('voices/af.pt', weights_only=True).to(device)
-af_bella = torch.load('voices/af_bella.pt', weights_only=True).to(device)
-af_sarah = torch.load('voices/af_sarah.pt', weights_only=True).to(device)
+
+# Load all voice models
+voice_models = {}
+for voice_name in VOICE_NAMES:
+    try:
+        voice_models[voice_name] = torch.load(f'voices/{voice_name}.pt', weights_only=True).to(device)
+        logging.info(f"Loaded voice: {voice_name}")
+    except Exception as e:
+        logging.error(f"Failed to load voice {voice_name}: {str(e)}")
 
 from kokoro import generate, tokenize, VOCAB
 
@@ -44,8 +57,6 @@ if not KOKORO_API_KEY:
     logging.info("Environment variable KOKORO_API_KEY is not set")
 else:
     logging.info(f"Environment variable KOKORO_API_KEY is {KOKORO_API_KEY}")
-
-warmup_text = "This is an inference API for TTS. It is now warming up..."
 
 load_start = time.perf_counter()
 logging.info(f"Models loaded in {time.perf_counter() - load_start} seconds.")
@@ -80,14 +91,10 @@ def get_wav_length_from_bytesio(bytes_io):
 def health_check():
     return {"status": "ok", "version": __version__}
 
-def get_voice_model(voice_name: str):
-    """Helper function to get the appropriate voice model"""
-    voice_mapping = {
-        "bella": af_bella,
-        "sarah": af_sarah,
-        "default": voicepack
-    }
-    return voice_mapping.get(voice_name, voicepack)
+def get_language_from_voice(voice_name: str) -> str:
+    """Determine language based on voice name prefix"""
+    prefix = voice_name[0]
+    return "en-us" if prefix == "a" else "en-gb" if prefix == "b" else "en-us"
 
 class TTSRequest(BaseModel):
     text: str = Field(..., title="Text to convert to speech")
@@ -96,10 +103,10 @@ class TTSRequest(BaseModel):
         title="Custom phonetics",
         description="Custom phonetics string for pronunciation. If not provided, will be generated automatically."
     )
-    voice: Optional[str] = Field(
-        "default",
+    voice: str = Field(
+        "af",
         title="Voice selection",
-        description="Select voice to use: 'bella', 'sarah', or 'default'"
+        description="Select voice to use from available options",
     )
     output_sample_rate: Optional[int] = 24000
     speed: Optional[float] = Field(
@@ -109,16 +116,39 @@ class TTSRequest(BaseModel):
     )
     output_format: Optional[str] = "mp3"
 
+@app.get("/voices")
+def list_voices():
+    """Endpoint to list all available voices"""
+    return {
+        "voices": [
+            {
+                "name": voice,
+                "language": get_language_from_voice(voice)
+            }
+            for voice in VOICE_NAMES
+        ]
+    }
+
 @app.post("/generate")
 def generate_speech(request: TTSRequest, api_key: str = Depends(verify_api_key)):
     start = time.perf_counter()
     wav_bytes = BytesIO()
     
-    # Get the appropriate voice model
-    voice_model = get_voice_model(request.voice)
+    if request.voice not in voice_models:
+        raise HTTPException(status_code=400, detail=f"Voice '{request.voice}' not found. Available voices: {', '.join(VOICE_NAMES)}")
     
-    # Generate phonetics from text
-    audio, _ = generate(kokoro_model, request.text, voice_model, speed=request.speed, ps=request.phonetics)
+    voice_model = voice_models[request.voice]
+    language = get_language_from_voice(request.voice)
+    
+    # Generate audio with language parameter
+    audio, phonemes = generate(
+        kokoro_model, 
+        request.text, 
+        voice_model, 
+        speed=request.speed, 
+        ps=request.phonetics,
+        lang=language[0]  # Pass first letter of language code ('a' or 'b')
+    )
 
     if audio is None:
         raise HTTPException(status_code=500, detail="Failed to generate audio")
@@ -128,7 +158,7 @@ def generate_speech(request: TTSRequest, api_key: str = Depends(verify_api_key))
     wav.write(wav_bytes, request.output_sample_rate, (audio * 32767).astype(np.int16))
         
     inference_time = time.perf_counter() - start
-    logging.info(f"Generated audio in {inference_time} seconds.")
+    logging.info(f"Generated audio in {inference_time} seconds with voice {request.voice}")
     
     audio, duration_seconds = get_wav_length_from_bytesio(wav_bytes)
     
@@ -136,6 +166,7 @@ def generate_speech(request: TTSRequest, api_key: str = Depends(verify_api_key))
         "x-inference-time": str(inference_time),
         "x-audio-length": str(duration_seconds),
         "x-realtime-factor": str(duration_seconds / inference_time),
+        "x-phonemes": phonemes
     }
     
     return_bytes = BytesIO()
