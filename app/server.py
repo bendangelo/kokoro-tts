@@ -25,7 +25,7 @@ if log_level not in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
 logging.basicConfig(level=getattr(logging, log_level))
 
 # Server configuration
-host = os.getenv("HOST", "*")
+host = os.getenv("HOST", "0.0.0.0")
 port = os.getenv("PORT", "4321")
 port = int(port)
 
@@ -91,10 +91,17 @@ def get_wav_length_from_bytesio(bytes_io):
 def health_check():
     return {"status": "ok", "version": __version__}
 
-def get_language_from_voice(voice_name: str) -> str:
-    """Determine language based on voice name prefix"""
-    prefix = voice_name[0]
-    return "en-us" if prefix == "a" else "en-gb" if prefix == "b" else "en-us"
+def get_language_from_voice(voice_name: str) -> tuple[str, str]:
+    """
+    Determine language based on voice name prefix
+    Returns a tuple of (display_language, phonemizer_code)
+    """
+    if voice_name.startswith('a'):
+        return "en-us", "a"
+    elif voice_name.startswith('b'):
+        return "en-gb", "b"
+    else:
+        return "en-us", "a"  # default to US English
 
 class TTSRequest(BaseModel):
     text: str = Field(..., title="Text to convert to speech")
@@ -123,7 +130,7 @@ def list_voices():
         "voices": [
             {
                 "name": voice,
-                "language": get_language_from_voice(voice)
+                "language": get_language_from_voice(voice)[0]
             }
             for voice in VOICE_NAMES
         ]
@@ -138,16 +145,16 @@ def generate_speech(request: TTSRequest, api_key: str = Depends(verify_api_key))
         raise HTTPException(status_code=400, detail=f"Voice '{request.voice}' not found. Available voices: {', '.join(VOICE_NAMES)}")
     
     voice_model = voice_models[request.voice]
-    language = get_language_from_voice(request.voice)
+    display_language, phonemizer_code = get_language_from_voice(request.voice)
     
-    # Generate audio with language parameter
+    # Generate audio with phonemizer code
     audio, phonemes = generate(
         kokoro_model, 
         request.text, 
         voice_model, 
         speed=request.speed, 
         # ps=request.phonetics,
-        lang=language[0]  # Pass first letter of language code ('a' or 'b')
+        lang=phonemizer_code
     )
 
     if audio is None:
@@ -162,12 +169,17 @@ def generate_speech(request: TTSRequest, api_key: str = Depends(verify_api_key))
     
     audio, duration_seconds = get_wav_length_from_bytesio(wav_bytes)
     
+     # Base64 encode the phonemes to ensure they can be safely transmitted in headers
+    encoded_phonemes = base64.b64encode(phonemes.encode('utf-8')).decode('ascii')
+    
     headers = {
         "x-inference-time": str(inference_time),
         "x-audio-length": str(duration_seconds),
         "x-realtime-factor": str(duration_seconds / inference_time),
-        "x-phonemes": phonemes
+        "x-phonemes-base64": encoded_phonemes,
+        "x-language": display_language
     }
+    
     
     return_bytes = BytesIO()
     audio.export(return_bytes, format=request.output_format)
