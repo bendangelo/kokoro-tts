@@ -1,6 +1,9 @@
 # Kokoro TTS
 Text-To-Speech Inference Server for [Kokoro TTS](https://huggingface.co/hexgrad/Kokoro-82M/tree/main).
 
+This is used on my project [English Fox](https://englishfox.app/) to generate
+pronunciation and sentence audio. You can see an example of this on the [hello page](https://englishfox.app/dictionary/hello).
+
 ## Usage
 
 ```
